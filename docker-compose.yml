@@ -1,0 +1,73 @@
+services:
+  db:
+    image: postgres:16
+    container_name: securechat-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: securechat
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    # ports:
+    #   - "5432:5432" # Hide DB from outside world
+    networks:
+      - securechat-network
+
+  backend:
+    build: ./backend
+    container_name: backend
+    # ports:
+    #   - "9090:9090" # Hide Backend from outside world
+    networks:
+      - securechat-network
+    environment:
+      - DB_HOST=db
+
+  # This service builds the frontend and exits.
+  # The built files are stored in a volume shared with NGINX.
+  frontend-builder:
+    build: ./frontend
+    container_name: frontend-builder
+    volumes:
+      - frontend_build:/app/dist
+    command: ["npm", "run", "build"]
+    networks:
+      - securechat-network
+
+  # This service generates SSL certs if they don't exist
+  cert-generator:
+    image: alpine/openssl
+    container_name: cert-generator
+    volumes:
+      - ./nginx/certs:/certs
+    command: >
+      req -x509 -nodes -days 365 -newkey rsa:2048 
+      -keyout /certs/server.key -out /certs/server.crt 
+      -subj "/C=PL/ST=Mazowieckie/L=Warsaw/O=SecureChat/OU=IT/CN=localhost"
+    networks:
+      - securechat-network
+
+  nginx:
+    image: nginx:stable
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - frontend_build:/usr/share/nginx/html:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+      - frontend-builder
+      - cert-generator
+    networks:
+      - securechat-network
+
+networks:
+  securechat-network:
+    driver: bridge
+
+volumes:
+  db_data:
+  frontend_build:
